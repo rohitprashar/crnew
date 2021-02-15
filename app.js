@@ -1,35 +1,57 @@
 require('dotenv').config()
 const express = require('express');
+const ejs =require('ejs')
+const bodyPraser= require('express');
+const mongoose = require('mongoose');
+// require the express session  passport and the passport-local-mongoose
+const session = require('express-session');
+const passport= require('passport')
+const passportLocalMongoose = require('passport-local-mongoose')
+
 const app = express();
 const PORT =3000;
-const bodyPraser= require('express');
 // use the body parse
 app.use(bodyPraser.urlencoded({extended:true}))
-
-// ejs 
+// set ejs 
 app.set('view engine', 'ejs');
-
 // static content
-app.use(express.static('public'))
+app.use(express.static('public'));
+
+// use the session or create the session object
+app.use(session({
+    secret: 'our node secret',
+    resave: false,
+    saveUninitialized: false
+  }))
+
+// initialize the passport
+app.use(passport.initialize()); 
+//tell passport to use the session object
+app.use(passport.session());
+
 
 // mongoose setup
-const mongoose = require('mongoose')
+
 const url = 'mongodb+srv://rprashar:36DLQie7Z1YYnzPH@cluster0.q7vuq.mongodb.net/UserDB?retryWrites=true&w=majority';
 mongoose.connect(url);
+mongoose.set("useCreateIndex",true)
 
-// mongoose encryption
-var encrypt = require('mongoose-encryption');
 
 // userSchema UserModel and Real Object
 const userSchema = new mongoose.Schema({
-    name:{type:String,required:true},
-    password:{type:String,required:true}
+    username:String,
+    password:String
 })
-// mongoose encryption 
 
-userSchema.plugin(encrypt, { secret: process.env.secretKey, encryptedFields: ['password'] });
+// use passport-local-mongoose plugin 
+userSchema.plugin(passportLocalMongoose);
 
-const UserModel = mongoose.model('User',userSchema);
+// created the usermodel
+const User = new mongoose.model('User',userSchema);
+passport.use(User.createStrategy())
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
+
 
 // the incoming requests
 
@@ -45,55 +67,58 @@ app.get("/register",function(req,res){
     res.render('register')
 })
 
-app.post("/register",function(req,res){
-
-    const user = new UserModel(
-        {
-            name:req.body.username,
-            password:req.body.password
-        }
-    )
-    user.save(function(err){
-        if(!err){
-            res.render("secrets")  
-        }
-        else{
-            console.log("some error occuredd while registering the user")
-        }
-    });
+app.get("/secrets",function(req,res){
+    if(req.isAuthenticated())
+    {
+        res.render("secrets")
+    }
+    else{
+        res.redirect("/login")
+    }
 })
 
+app.post("/register",function(req,res){
+    
+        
+    User.register({username:req.body.username}, req.body.password, function(err, user) {
+       if(err)
+       {
+           console.log("error occurred"+err)
+           res.redirect("/register")
+       } else{
+           console.log("success")
+           passport.authenticate("local")(req,res,function(){
+           res.redirect("/secrets")
+           })
+       }
+   })
+})
 
 app.post("/login",function(req,res){
-    // check whether the credentials are correct if not ask him to registerand then come
-    const userName=req.body.username;
-    const password=req.body.password;
+    // again passport will check wehther this user has an account or not
+    const user =new User({
+        username:req.body.username,
+        password:req.body.password
+    })
 
-
-    UserModel.findOne({name:userName},function(err,foundUser){
-        if(!err)
-          {
-              if(foundUser)
-              {
-                  if(foundUser.password===password)
-                  {
-                      console.log(" password is "+foundUser.password )
-                    console.log(" user found")
-                    res.render("secrets")
-                  }
-                 
-              }
-              else{
-                console.log(" user not found")
-                  res.render("register")
-              }
-          }
-          else{
-              res.redirect("/")
-          }
+    // Passport exposes a login fucntion on req to establish a login session
+    req.login(user,function(err){
+     if(err)
+     {
+         console.log('user has not registered with us ')
+         res.redirect("/register")
+     }else{
+        passport.authenticate("local")(req,res,function(){
+            res.redirect("/secrets")
+            })
+     }
     })
 })
 
+app.get('/logout', function(req, res){
+    req.logout();
+    res.redirect('/');
+  });
 app.listen(PORT,function(){
     console.log('The App is running on PORT '+PORT)
 })
